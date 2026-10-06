@@ -44,7 +44,10 @@ def main(use_llm=False):
             from answer import answer_question
             out = answer_question(q["question"])
             print("   expected:", q["expected_answer"][:120])
-            print("   got     :", out["text"][:300].replace("\n", " "))
+            got = out["answer"] if not out["refused"] else "REFUSED (" + out["reason"] + ")"
+            print("   got     :", got[:300].replace("\n", " "))
+            if not out["refused"]:
+                print("   verified:", out["verified"], "| source:", label(out["source"]["chunk"]))
     print(f"\nrecall@{K} on 'answer' questions: {hits}/{total}")
     print("Look at the refusal rows (types refusal*): their top cov/lex/cos are the values "
           "we must stay BELOW to refuse. Compare with the 'answer' rows to pick a threshold.")
