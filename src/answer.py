@@ -199,16 +199,27 @@ def answer_question(question: str, as_of: date | None = None, retriever: Retriev
     t_search = time.time() - t0
     out = dict(refused=True, reason="", answer="", hits=hits, source=None, quote="", span=None,
                verified=False, external_ref=None, pointers=_pointers(hits), as_of=as_of,
-               timing={"search_s": round(t_search, 2), "llm_s": 0.0, "model": None})
+               timing={"search_s": round(t_search, 2), "llm_s": 0.0, "model": None}, not_yet_valid=None)
+
+    def _weak(h):
+        return (h["cos"] < COS_MIN) if h["cos"] is not None else (h["coverage"] < COV_MIN)
+
+    def _check_future(out):
+        # Past date chosen: does the topic exist in a version that only became valid later?
+        if as_of < date.today():
+            now = r.search(question, k=1, as_of=date.today())
+            if now and not _weak(now[0]) and now[0]["chunk"]["valid_from"]:
+                out["not_yet_valid"] = now[0]["chunk"]
 
     # ---- refusal in code, before any LLM call -------------------------------------------
     if not hits:
         out["reason"] = "no_valid_sources"
+        _check_future(out)
         return out
     top = hits[0]
-    weak = (top["cos"] < COS_MIN) if top["cos"] is not None else (top["coverage"] < COV_MIN)
-    if weak:
+    if _weak(top):
         out["reason"] = "low_similarity"
+        _check_future(out)
         return out
 
     # ---- LLM -----------------------------------------------------------------------------
@@ -227,17 +238,28 @@ def answer_question(question: str, as_of: date | None = None, retriever: Retriev
 
     try:
         idx = int(data.get("source", 1)) - 1
-        src = hits[idx]
-    except (ValueError, IndexError, TypeError):
-        src = hits[0]
+    except (ValueError, TypeError):
+        idx = 0
+    src = hits[idx] if 0 <= idx < len(hits) else hits[0]    # out-of-range (e.g. 0) -> first hit
     quote = (data.get("quote") or "").strip()
+    answer_text = (data.get("answer") or "").strip()
     span = locate(quote, src["chunk"]["text"])
-    verified = span is not None
-    if not verified:                                         # show the closest line, flagged
+    # every number in the answer must also appear in the quote, otherwise it is "not verified"
+    nums = lambda s: set(re.findall(r"\d+(?:[.,]\d+)*", BIDI.sub("", s)))
+    verified = span is not None and nums(answer_text) <= nums(quote)
+    if span is None:                                         # show the closest line, flagged
         span = best_line(question, src["chunk"]["text"])
-    out.update(refused=False, reason="ok", answer=(data.get("answer") or "").strip(),
+    out.update(refused=False, reason="ok", answer=answer_text,
                source=src, quote=quote, span=span, verified=verified,
                external_ref=data.get("external_ref"))
+
+    # ---- past date + source no longer valid today: point to the current text (code only) ----
+    out["superseded_by"] = None
+    vt = str(src["chunk"].get("valid_to") or "")
+    if as_of < date.today() and vt and vt < date.today().isoformat():
+        now = r.search(question, k=1, as_of=date.today())
+        if now and not _weak(now[0]):
+            out["superseded_by"] = now[0]["chunk"]
     return out
 
 

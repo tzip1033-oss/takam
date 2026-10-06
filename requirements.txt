@@ -5,5 +5,5 @@ numpy
 rank-bm25
 sentence-transformers
 streamlit
-google-generativeai
+google-genai
 openai

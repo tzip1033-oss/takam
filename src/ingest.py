@@ -32,15 +32,16 @@ OUT = ROOT / "data" / "processed" / "chunks.jsonl"
 MAX_CHARS = 1500
 
 LEVEL_RE = re.compile(r"רמה\s*(\d)")
-BIDI = re.compile(r"[\u200E\u200F\u202A-\u202E]")
+BIDI = re.compile(r"[\u200e\u200f\u202a-\u202e]")
 
-ALL_UNITS: dict = {}
+ALL_UNITS: dict = {}   # doc_id -> parsed units (used by the sanity checks)
 
 
 def clean(text: str) -> str:
     return " ".join(BIDI.sub("", text).split())
 
 
+# ---------------------------------------------------------------- docx helpers
 def iter_blocks(doc):
     """Yield paragraphs and tables in document order."""
     for child in doc.element.body.iterchildren():
@@ -70,7 +71,12 @@ def numbering_off(p: Paragraph) -> bool:
 
 
 def table_text(tbl: Table) -> str:
-    """One line per row, cells joined with ' | '."""
+    """One line per row, cells joined with ' | '.
+
+    python-docx returns the same cell object repeatedly for merged cells, so we drop
+    repeats by XML identity (NOT by equal text: two columns can legitimately both say '√').
+    Empty cells are kept (shown as '-') so the columns stay aligned with the header.
+    """
     rows = []
     for r in tbl.rows:
         seen, cells = set(), []
@@ -89,13 +95,14 @@ def embedded_objects(path: Path):
         return [n for n in z.namelist() if n.startswith("word/embeddings/")]
 
 
+# ---------------------------------------------------------------- parsing
 def parse_doc(path: Path):
     """Return a list of units: dict(kind, label, is_new, heading, text)."""
     doc = Document(path)
     counters = [0] * 6
     h1 = ""
     last_label = ""
-    annex = None
+    annex = None            # dict(label, title)
     wait_annex_title = False
     units = []
 
@@ -145,13 +152,14 @@ def parse_doc(path: Path):
     return units
 
 
-SOFT_MIN = 700
+# ---------------------------------------------------------------- chunking
+SOFT_MIN = 700   # prefer to start a new chunk at a short level-2 heading once we have this much
 
 
 def group_key(u):
     if u["kind"].startswith("annex"):
         return ("annex", u["label"])
-    return ("body", u["label"].split(".")[0])
+    return ("body", u["label"].split(".")[0])      # top-level section: 1, 2, 3, ...
 
 
 def is_heading(u):
@@ -213,7 +221,7 @@ def build_chunks(units, meta):
         sec = c["section_first"] if c["section_first"] == c["section_last"] \
             else f"{c['section_first']}-{c['section_last']}"
         c.update(
-            chunk_id=f"{meta['doc_id']}#{i:03d}",
+            chunk_id=f"{meta['doc_id']}@{meta['edition'] or 'x'}#{i:03d}",
             doc_id=meta["doc_id"], doc_type=meta["doc_type"], title=meta["title"],
             edition=meta["edition"], valid_from=meta["valid_from"], valid_to=meta["valid_to"],
             parent=meta["parent"], source_url=meta["source_url"], section=sec,
@@ -222,6 +230,53 @@ def build_chunks(units, meta):
         c.update(extract_refs(c["text"]))
         out.append(c)
     return out
+
+
+# ---------------------------------------------------------------- text documents (e.g. a circular extracted from PDF)
+CLAUSE = re.compile(r"^[\"\s]*\.?(\d+(?:\.\d+)*)(?=[^\d.\s])")
+
+
+def build_text_chunks(path, meta):
+    """Chunk a plain-text document (one paragraph per line, clause numbers like '.3.7.1text').
+    Used for documents that are not Word files, e.g. a PDF circular converted with pdftotext."""
+    lines = [l.strip() for l in open(path, encoding="utf8").read().splitlines() if l.strip()]
+    lines = [l for l in lines if not l.startswith("=== עמוד") and not re.fullmatch(r"\d{1,2}", l)
+             and not l.startswith(("מדינת ישראל", "אגף תנאי שירות", "אגף בכיר תכנון"))]
+    units, cur_label = [], "0"
+    for l in lines:
+        m = CLAUSE.match(l)
+        if m and len(m.group(1)) <= 12:
+            cur_label = m.group(1)
+            units.append(dict(kind="body", label=cur_label, is_new=True, heading="", text=l))
+        elif units:
+            units[-1]["text"] += "\n" + l              # continuation line of the same clause
+        else:
+            units.append(dict(kind="body", label="0", is_new=True, heading="", text=l))
+    # group clauses into chunks of at most MAX_CHARS
+    raw, buf, size = [], [], 0
+    def flush():
+        if buf:
+            raw.append(dict(section_first=buf[0]["label"], section_last=buf[-1]["label"],
+                            heading="", is_annex=False, has_table=False,
+                            text="\n".join(u["text"] for u in buf)))
+    for u in units:
+        n = len(u["text"])
+        if buf and size + n > MAX_CHARS:
+            flush(); buf, size = [], 0
+        buf.append(u); size += n
+    flush()
+    out = []
+    for i, c in enumerate(raw):
+        sec = c["section_first"] if c["section_first"] == c["section_last"] \
+            else f"{c['section_first']}-{c['section_last']}"
+        c.update(chunk_id=f"{meta['doc_id']}@{meta['edition'] or 'x'}#{i:03d}",
+                 doc_id=meta["doc_id"], doc_type=meta["doc_type"], title=meta["title"],
+                 edition=meta["edition"], valid_from=meta["valid_from"], valid_to=meta["valid_to"],
+                 parent=meta["parent"], source_url=meta["source_url"], section=sec)
+        c["context"] = f"{meta['doc_type']} {meta['doc_id']} {meta['title']}"
+        c.update(extract_refs(c["text"]))
+        out.append(c)
+    return out, units
 
 
 REF_TAKAM = re.compile(r"(?:מס'|מספר|תכ[\"״]ם)[^\d]{0,80}?(\d{1,2}\.\d{1,2}(?:\.\d{1,2}){0,2})")
@@ -238,6 +293,7 @@ def extract_refs(text):
     )
 
 
+# ---------------------------------------------------------------- main
 def load_metadata():
     rows = {}
     with open(META, encoding="utf8", newline="") as f:
@@ -250,13 +306,19 @@ def main(check=False):
     meta = load_metadata()
     OUT.parent.mkdir(parents=True, exist_ok=True)
     all_chunks, report = [], []
-    for path in sorted(RAW.glob("*.docx")):
+    for path in sorted(list(RAW.glob("*.docx")) + list(RAW.glob("*.txt"))):
         m = meta.get(path.name)
         if m is None:
             print(f"!! no metadata row for {path.name} - skipped")
             continue
+        if path.suffix == ".txt":
+            chunks, units = build_text_chunks(path, m)
+            all_chunks.extend(chunks)
+            report.append((m["doc_id"], len(units), len(chunks), sum(len(c["text"]) for c in chunks), 0))
+            continue
         units = parse_doc(path)
-        ALL_UNITS[m["doc_id"]] = units
+        if not m["valid_to"] or m["doc_id"] not in ALL_UNITS:   # older editions must not override the current one
+            ALL_UNITS[m["doc_id"]] = units
         chunks = build_chunks(units, m)
         all_chunks.extend(chunks)
         report.append((m["doc_id"], len(units), len(chunks),
