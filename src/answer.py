@@ -29,6 +29,10 @@ load_dotenv(ROOT / ".env")
 
 PROVIDER = os.getenv("LLM_PROVIDER", "gemini")                 # gemini | groq
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+# tried in order when the main model is overloaded (503) or rate-limited (429)
+CALL_TIMEOUT_S = float(os.getenv("CALL_TIMEOUT_S", "20"))      # per model call
+TOTAL_BUDGET_S = float(os.getenv("TOTAL_BUDGET_S", "45"))      # per question
+GEMINI_FALLBACKS = [m.strip() for m in os.getenv("GEMINI_FALLBACKS", "gemini-flash-lite-latest,gemini-2.5-flash").split(",") if m.strip()]
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 # ---- refusal thresholds (PROVISIONAL: tuned on a few questions, see eval/ and README) ----
@@ -54,6 +58,9 @@ SYSTEM = """אתה עוזר שעונה על שאלות לגבי הוראות ת�
 
 
 # ------------------------------------------------------------------ LLM call (swap here)
+LAST_MODEL = {"name": None}
+
+
 def call_llm(prompt: str, system: str = SYSTEM) -> str:
     """Return the raw text of the model's reply (expected to be JSON)."""
     if PROVIDER == "gemini":
@@ -62,13 +69,25 @@ def call_llm(prompt: str, system: str = SYSTEM) -> str:
         key = os.getenv("GEMINI_API_KEY")
         if not key:
             raise RuntimeError("GEMINI_API_KEY is missing in .env")
-        client = genai.Client(api_key=key)
-        resp = client.models.generate_content(
-            model=GEMINI_MODEL, contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system, temperature=0,
-                response_mime_type="application/json"))
-        return resp.text
+        import time
+        # a hard time limit per call (ms) and for the whole question, so the screen never hangs
+        client = genai.Client(api_key=key, http_options=types.HttpOptions(timeout=int(CALL_TIMEOUT_S * 1000)))
+        deadline = time.time() + TOTAL_BUDGET_S
+        last = None
+        for model in [GEMINI_MODEL] + [m for m in GEMINI_FALLBACKS if m != GEMINI_MODEL]:
+            if time.time() > deadline:
+                break
+            try:
+                resp = client.models.generate_content(
+                    model=model, contents=prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system, temperature=0,
+                        response_mime_type="application/json"))
+                LAST_MODEL["name"] = model
+                return resp.text
+            except Exception as e:           # 503 / 429 / timeout / 404: go on to the next model
+                last = e
+        raise last or RuntimeError("LLM time budget exhausted")
     if PROVIDER == "groq":
         from openai import OpenAI
         client = OpenAI(api_key=os.getenv("GROQ_API_KEY"), base_url="https://api.groq.com/openai/v1")
@@ -172,11 +191,15 @@ def answer_question(question: str, as_of: date | None = None, retriever: Retriev
         source (hit dict or None), quote (str), span ((start, end) in source text or None),
         verified (bool: quote found verbatim), external_ref (str|None), pointers (list)
     """
+    import time
+    t0 = time.time()
     r = retriever or get_retriever()
     as_of = as_of or date.today()
     hits = r.search(question, k=TOP_K, as_of=as_of)
+    t_search = time.time() - t0
     out = dict(refused=True, reason="", answer="", hits=hits, source=None, quote="", span=None,
-               verified=False, external_ref=None, pointers=_pointers(hits), as_of=as_of)
+               verified=False, external_ref=None, pointers=_pointers(hits), as_of=as_of,
+               timing={"search_s": round(t_search, 2), "llm_s": 0.0, "model": None})
 
     # ---- refusal in code, before any LLM call -------------------------------------------
     if not hits:
@@ -189,9 +212,12 @@ def answer_question(question: str, as_of: date | None = None, retriever: Retriev
         return out
 
     # ---- LLM -----------------------------------------------------------------------------
+    t1 = time.time()
     try:
         data = _parse_json(call_llm(build_prompt(question, hits)))
-    except Exception as e:                                   # network, key, quota, bad JSON
+        out["timing"].update(llm_s=round(time.time() - t1, 2), model=LAST_MODEL["name"])
+    except Exception as e:
+        out["timing"].update(llm_s=round(time.time() - t1, 2))                                   # network, key, quota, bad JSON
         out["reason"] = f"llm_error: {e}"
         return out
     if not data or not data.get("answerable"):

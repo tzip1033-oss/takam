@@ -81,11 +81,16 @@ def save_feedback(question, answer, note):
 def show_answer(question: str, as_of: date, retriever):
     with st.spinner("מחפש ומנסח תשובה..."):
         res = answer_question(question, as_of=as_of, retriever=retriever)
+    t = res.get("timing", {})
+    st.caption(f"⏱ חיפוש {t.get('search_s')} שנ׳ · מודל {t.get('llm_s')} שנ׳ ({t.get('model') or 'לא הופעל'})")
 
     if res["refused"]:
-        st.warning(REFUSAL_TEXT)
         if res["reason"].startswith("llm_error"):
-            st.error("שגיאה בקריאה למודל: " + res["reason"][11:])
+            st.error("השירות של המודל אינו זמין כרגע (עומס או תקלה זמנית). אפשר לנסות שוב בעוד רגע.")
+            with st.expander("פרטי השגיאה"):
+                st.code(res["reason"][11:])
+        else:
+            st.warning(REFUSAL_TEXT)
         if res["pointers"] or res["external_ref"]:
             refs = ", ".join(res["pointers"]) or res["external_ref"]
             st.info(f"ייתכן שהמידע נמצא בתקשי״ר ({refs}), שההוראות הקרובות מפנות אליו. המקור הזה אינו במאגר.")
