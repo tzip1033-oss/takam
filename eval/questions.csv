@@ -1,0 +1,15 @@
+id,question,type,expected_doc,expected_answer,expected_source,status,notes
+1,כמה שבועות חופשת לידה מגיעים להורה?,answer,13.1.10,"26 שבועות, מהם 15 בתשלום (דמי לידה). זכאות: 12 חודשי עבודה אצל המעסיק ל-26 שבועות, ו-6 חודשים ברצף לפני ההיריון ל-15 בתשלום",13.1.10 מבוא,verified from file,
+2,כמה שעות בחודש עובד סטודנט?,answer,13.1.3,ככלל 96 שעות; בהסכמה בכתב מעל 96 ועד 120; יתרת שעות בחודשים עוקבים עד 120 או 150,13.1.3 סעיף 2.1,verified from file,
+3,כמה ימי חופשה נטו מגיעים לסטודנט בשבוע עבודה של 5 ימים?,answer,13.1.3,12 ימים נטו בשנת עבודה (14 בשבוע של 6 ימים),13.1.3 סעיף ימי חופשה,verified from file,
+4,מה קורה לטלפון הנייד של הורה בהארכת תקופת לידה?,answer,13.1.10,"המכשיר נשאר אצל ההורה אם רצונו בכך, בלי מכסת שיחות; ההוצאות נגבות מאמצעי התשלום שנמסר",13.1.10,verified from file,hidden topic: keyword search returns 13.5.3
+5,האם מגיעה קצובת ביגוד בתקופת לידה ללא תשלום?,answer,13.1.10,לא. בשמירת היריון ובלידה בתשלום כן,13.1.10 נספח ד (טבלה),verified from file,hidden topic: table in annex
+6,צריך להחזיר החזר שכר לימוד בחופשת לידה ללא תשלום?,answer,13.1.10,קיזוז יחסי לפי נוסחה (ימי הלידה ללא תשלום / ימי התקופה שבגינה שולם),13.1.10 נספח ג,verified from file,hidden topic
+7,מה קורה בתשלום השכר בחודשי חגים (פסח/סוכות)?,answer,13.1.5,במקרים מסוימים משולמת מקדמה; לעובדים פעילים 80% מהשכר בחודש הקודם,13.1.5 סעיף 2.1.4,verified from file,hidden topic: keyword search returns the holiday gifts instructions
+8,כמה עולה אגרת רישוי לעובד בעל רכב שירות?,answer,13.4.1.3,"מכונית 1,941 ₪ נטו; אופנוע/קטנוע 357 ₪ נטו (סכום מרבי, מיום 01.04.2026)",N.13.4.1.3,verified from file,table in the notice (edition 20); amounts change yearly - answer must show the validity date
+9,מה סכום תוספת המעונות?,refusal_pointer,13.1.10,"אין במאגר. ההוראות מפנות לתקשי""ר 25.61, והסכום נקבע בחוזר הממונה על השכר",13.1.10 + תקשי״ר 25.61 (חיצוני),verified,expected: refuse + point to Takshir
+10,מה שיעור תוספת היוקר?,refusal_pointer,13.1.1,ההוראה מפנה להסכם ואינה כוללת שיעור,13.1.1,to_verify,check 13.1.1 text before using
+11,כמה ימי חופשה שנתית מגיעים לעובד קבוע בשירות המדינה?,refusal,,לא נמצא במאגר,—,verified against corpus,no instruction in the sample answers this
+12,אני גר ביישוב מוטב. איך מקבלים את ההטבה במשכורת?,answer_stretch,13.5.1,"נספח ד (PDF מוטבע): טפסים 1312/1312א, תנאים מצטברים, אישור הרשות המקומית",13.5.1 נספח ד,stretch,needs extraction of embedded PDF
+13,מה היה הכלל לגבי שעות סטודנט ב-2022?,temporal_stretch,13.1.3,המאגר מכיל רק מהדורה 8; לא ניתן לענות על 2022,13.1.3,stretch,tests validity filter once an older edition is added
+14,מה תקרת ימי החופשה שאפשר לצבור ולפדות בתום שירות?,answer,13.0.0-N-vacation,"עד 55 ימים (שבוע 5 ימים) או 65 (שבוע 6 ימים); במקרים חריגים באישור עד 140 ימים. מקור חיצוני: תקשי""ר 33.132 ו-33.135",N.13.0.0 תקרת פדיון,verified from file,hidden topic: the number sits only in a notice; 13.0.0 lists only its title

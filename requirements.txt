@@ -1,0 +1,9 @@
+python-docx
+python-dotenv
+pandas
+numpy
+rank-bm25
+sentence-transformers
+streamlit
+google-generativeai
+openai
