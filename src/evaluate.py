@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import csv
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -28,6 +29,8 @@ def main(use_llm=False):
     print(f"embeddings: {'yes' if r.emb is not None else 'NO (lexical only)'}  k={K}\n")
     print(f"{'id':>2} {'type':16} {'expected':9} {'rank':>4} {'top cov':>7} {'top lex':>7} {'top cos':>7}  question")
     hits = total = 0
+    stats = dict(ans=0, ans_ok=0, ans_verified=0, ans_partly=0, ans_refused=0, ans_error=0, ref=0, ref_ok=0, ref_code=0, ref_error=0)
+    wrong_refusals, missed_refusals, unverified = [], [], []
     for q in rows:
         res = r.search(q["question"], k=K)
         docs = [h["chunk"]["doc_id"] for h in res]
@@ -43,12 +46,49 @@ def main(use_llm=False):
         if use_llm:
             from answer import answer_question
             out = answer_question(q["question"])
+            for _ in range(2):              # free-tier quota / overload: wait and retry, so an API error is not read as a refusal
+                if not out["reason"].startswith("llm_error"):
+                    break
+                time.sleep(20)
+                out = answer_question(q["question"])
             print("   expected:", q["expected_answer"][:120])
-            got = out["answer"] if not out["refused"] else "REFUSED (" + out["reason"] + ")"
+            got = out["answer"] if not out["refused"] else "REFUSED (" + out["reason"][:60] + ")"
+            if out["timing"].get("model"):
+                print("   model   :", out["timing"]["model"])
             print("   got     :", got[:300].replace("\n", " "))
             if not out["refused"]:
-                print("   verified:", out["verified"], "| source:", label(out["source"]["chunk"]))
+                print("   verified:", out["verified"], "(numbers in source:", out["numbers_in_source"], ") | source:", label(out["source"]["chunk"]))
+            if q["type"] == "answer":
+                stats["ans"] += 1
+                if out["reason"].startswith("llm_error"):
+                    stats["ans_error"] += 1
+                elif out["refused"]:
+                    stats["ans_refused"] += 1
+                    wrong_refusals.append(q["id"])
+                else:
+                    stats["ans_ok"] += out["source"]["chunk"]["doc_id"] == exp     # right document
+                    stats["ans_verified"] += out["verified"]
+                    stats["ans_partly"] += (not out["verified"]) and out["numbers_in_source"]
+                    if not out["verified"]:
+                        unverified.append(q["id"])
+            elif q["type"] in ("refusal", "refusal_pointer", "temporal_stretch"):
+                stats["ref"] += 1
+                stats["ref_error"] += out["reason"].startswith("llm_error")
+                stats["ref_ok"] += out["refused"] and not out["reason"].startswith("llm_error")
+                stats["ref_code"] += out["refused"] and not out["reason"].startswith(("model", "llm"))
+                if not out["refused"]:
+                    missed_refusals.append(q["id"])
+            if out["pointers"] and out["refused"]:
+                print("   pointers:", ", ".join(out["pointers"]))
     print(f"\nrecall@{K} on 'answer' questions: {hits}/{total}")
+    if use_llm:
+        a, f = stats["ans"], stats["ref"]
+        print(f"\nanswer questions: {a}  answered from the expected document: {stats['ans_ok']}/{a}  "
+              f"wrongly refused: {stats['ans_refused']}/{a} {wrong_refusals}  API errors: {stats['ans_error']}\n"
+              f"  answered: {a - stats['ans_refused'] - stats['ans_error']}  verified: {stats['ans_verified']}  "
+              f"partly verified (numbers elsewhere in the source): {stats['ans_partly']}  not verified: {unverified}")
+        print(f"refusal questions: {f}  correctly refused: {stats['ref_ok']}/{f} "
+              f"(of them refused in code before the model: {stats['ref_code']})  answered anyway: {missed_refusals}  API errors: {stats['ref_error']}")
     print("Look at the refusal rows (types refusal*): their top cov/lex/cos are the values "
           "we must stay BELOW to refuse. Compare with the 'answer' rows to pick a threshold.")
 

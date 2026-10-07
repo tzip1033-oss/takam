@@ -335,7 +335,10 @@ def main(check=False):
         print(f"{doc_id:10} {nu:6d} {nc:7d} {nch:8d}  {warn}")
     todo = [m["file"] for m in meta.values() if "TODO" in (m["verified_on_site"] + m["doc_id"])]
     if todo:
-        print("\nmetadata TODO rows:", ", ".join(todo))
+        print("\nmetadata TODO rows (information missing, needs the site):", ", ".join(todo))
+    unconf = [m["file"] for m in meta.values() if "UNCONFIRMED" in m["verified_on_site"]]
+    if unconf:
+        print("metadata UNCONFIRMED rows (taken from the file, confirm on the site):", ", ".join(unconf))
     if check:
         sanity()
 

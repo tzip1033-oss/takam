@@ -35,35 +35,16 @@ st.set_page_config(page_title="עוזר הוראות תכ״ם (POC)", page_icon=
 st.markdown(
     """
     <style>
-      .block-container {direction: rtl; text-align: right; max-width: 900px; padding-top: 20px;}
-      .stTextInput input, .stDateInput input {direction: rtl; text-align: right; border-radius: 12px; border: 2px solid #e0e0e0; padding: 12px 16px; font-size: 16px;}
-      .stTextInput input:focus, .stDateInput input:focus {border-color: #4a90e2; box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);}
-
-      /* Chat container styling */
-      .chat-container {background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); border-radius: 20px; padding: 30px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1); margin: 20px 0;}
-      .search-box-wrapper {background: white; border-radius: 16px; padding: 20px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); margin-bottom: 20px;}
-
-      /* Source styling */
-      .src {background:#f6f7f9; border: 2px solid #dde1e6; border-radius: 12px; padding: 16px; line-height: 1.8; direction: rtl; text-align: right; color: #1b1f24; margin: 12px 0;}
-      .src mark {background: #ffe58a; padding: 2px 4px; border-radius: 4px; font-weight: 600;}
-      .meta {color: #5b6470; font-size: 0.9rem; margin-top: 12px;}
-
-      /* Button styling */
-      .stButton button {border-radius: 10px; border: none; padding: 12px 24px; font-weight: 600; transition: all 0.3s ease; background: linear-gradient(135deg, #4a90e2 0%, #357abd 100%);}
-      .stButton button:hover {transform: translateY(-2px); box-shadow: 0 6px 20px rgba(74, 144, 226, 0.4);}
-
-      /* Title and header */
-      .main-title {background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; text-align: center; margin: 30px 0;}
-
-      /* Dark mode */
+      .block-container {direction: rtl; text-align: right; max-width: 820px;}
+      .stTextInput input, .stDateInput input {direction: rtl; text-align: right;}
+      .src {background:#f6f7f9; border:1px solid #dde1e6; border-radius:8px; padding:12px 14px;
+            line-height:1.7; direction: rtl; text-align: right; color:#1b1f24;}
+      .src mark {background:#ffe58a; padding:1px 2px; border-radius:3px;}
+      .meta {color:#5b6470; font-size:0.9rem;}
       @media (prefers-color-scheme: dark) {
-        .search-box-wrapper {background: #1f242b; border: 2px solid #39414b;}
-        .stTextInput input, .stDateInput input {background: #2d3139; color: #e8ecf1; border-color: #39414b;}
-        .stTextInput input:focus, .stDateInput input:focus {border-color: #667eea; box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);}
-        .src {background: #2d3139; border-color: #39414b; color: #e8ecf1;}
-        .src mark {background: #7a6200; color: #fff;}
-        .meta {color: #a9b3bf;}
-        .chat-container {background: linear-gradient(135deg, #1f242b 0%, #2d3139 100%);}
+        .src {background:#1f242b; border-color:#39414b; color:#e8ecf1;}
+        .src mark {background:#7a6200; color:#fff;}
+        .meta {color:#a9b3bf;}
       }
     </style>
     """,
@@ -158,8 +139,12 @@ def show_answer(question: str, as_of: date, retriever):
             st.markdown(f'<div class="src">{html.escape(nxt["text"]).replace(chr(10), "<br>")}</div>',
                         unsafe_allow_html=True)
     if not res["verified"]:
-        st.caption("⚠️ לא אומת: הציטוט לא נמצא מילה במילה במקור, או שמספר בתשובה אינו מופיע בציטוט. "
-                   "יש לבדוק מול המקור המודגש.")
+        if res.get("numbers_in_source"):
+            st.caption("⚠️ אומת חלקית: הציטוט נמצא מילה במילה במקור, ומספרי התשובה מופיעים בקטע, "
+                       "אך לא כולם בציטוט עצמו. יש לבדוק מול המקור המודגש.")
+        else:
+            st.caption("⚠️ לא אומת: הציטוט לא נמצא מילה במילה במקור, או שמספר בתשובה אינו מופיע בקטע. "
+                       "יש לבדוק מול המקור המודגש.")
     with st.expander("פתח מקור", expanded=True):
         st.markdown(render_source(c["text"], res["span"]), unsafe_allow_html=True)
     with st.expander("מקורות נוספים שנבדקו"):
@@ -175,19 +160,18 @@ def show_answer(question: str, as_of: date, retriever):
 
 
 # ------------------------------------------------------------------ page
-st.markdown("<h1 class='main-title'>🤔 עוזר הוראות תכ״ם</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; color: #666; margin-bottom: 30px;'>מערכת ניסיונית (POC) המבוססת על מדגם  מפרק 13 (שכר)</p>", unsafe_allow_html=True)
+st.title("עוזר הוראות תכ״ם")
+st.caption("מערכת ניסיונית (POC) המבוססת על מדגם קטן מפרק 13 (שכר). היא מסייעת באיתור מידע, "
+           "ואינה מחליפה את ההוראה הרשמית. יש לאמת מול המסמך המקורי.")
 
 retriever = load_retriever()
 
-st.markdown("<div class='search-box-wrapper'>", unsafe_allow_html=True)
 c1, c2 = st.columns([3, 1])
 with c2:
     as_of = st.date_input("תקף לתאריך", value=date.today(), format="DD/MM/YYYY")
 with c1:
     typed = st.text_input("שאלה, או מילה אחת", key="typed",
-                          placeholder="למשל: כמה שעות בחודש עובד סטודנט?")
-st.markdown("</div>", unsafe_allow_html=True)
+                          placeholder="הקלד כאן שאלה")
 
 if "chosen" not in st.session_state:
     st.session_state.chosen = None
@@ -196,6 +180,11 @@ if "chosen" not in st.session_state:
 def choose(q):
     st.session_state.chosen = q
 
+
+# a new text in the box cancels the previously chosen question (otherwise its old answer stays on screen)
+if st.session_state.get("last_typed") != typed:
+    st.session_state.chosen = None
+    st.session_state.last_typed = typed
 
 question = st.session_state.chosen
 if typed.strip():
@@ -219,7 +208,5 @@ else:
     question = st.session_state.chosen
 
 if question:
-    st.markdown("<div class='chat-container'>", unsafe_allow_html=True)
-    st.markdown(f"### 💬 {question}")
+    st.markdown(f"##### {question}")
     show_answer(question, as_of, retriever)
-    st.markdown("</div>", unsafe_allow_html=True)

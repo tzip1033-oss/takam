@@ -3,15 +3,15 @@ H.13.0.0.docx,13.0.0,הוראה,"הודעות כלליות בנושא שכר, ת
 H.13.1.1.docx,13.1.1,הוראה,תוספת יוקר,1,2008-08-01,,,https://takam.mof.gov.il/document/H.13.1.1,yes (screenshot)
 H.13.1.2.docx,13.1.2,הוראה,חישוב שכר ליום בשבוע עבודה,2,2015-07-26,,,https://takam.mof.gov.il/document/H.13.1.2,yes (screenshot)
 H.13.1.3.docx,13.1.3,הוראה,כללי העסקת סטודנטים ושכרם,8,2024-02-13,,,https://takam.mof.gov.il/document/H.13.1.3,yes (change table: ed.8 published 13.02.2024)
-H.13.1.4.docx,13.1.4,הוראה,טיפול בעובדים ארעיים,,,,,https://takam.mof.gov.il/document/H.13.1.4,TODO: fill edition + valid_from from the site
+H.13.1.4.docx,13.1.4,הוראה,טיפול בעובדים ארעיים,1,2008-08-01,,,https://takam.mof.gov.il/document/H.13.1.4,yes (screenshot)
 H.13.1.5.docx,13.1.5,הוראה,תשלום מקדמות שכר,2,2022-05-03,,,https://takam.mof.gov.il/document/H.13.1.5,yes (screenshot)
 H.13.1.6.docx,13.1.6,הוראה,הרשאות שכר ומסירת נתוני שכר,3,2026-01-27,,,https://takam.mof.gov.il/document/H.13.1.6,yes (screenshot)
 H.13.1.10.docx,13.1.10,הוראה,"זכויות בתקופת היריון, לידה והורות",4,2020-08-18,,,https://takam.mof.gov.il/document/H.13.1.10,yes (screenshot)
 H.13.5.0.docx,13.5.0,הוראה,הודעות כלליות בנושא מיסוי שכר והטבות שווה כסף,1,2013-01-01,,,https://takam.mof.gov.il/document/H.13.5.0,yes (screenshot)
-H.13.5.1.docx,13.5.1,הוראה,אופן יישום כללי המס במגזר הציבורי,,,,,https://takam.mof.gov.il/document/H.13.5.1,TODO: fill edition + valid_from from the site
+H.13.5.1.docx,13.5.1,הוראה,אופן יישום כללי המס במגזר הציבורי,8,2025-11-01,,,https://takam.mof.gov.il/document/H.13.5.1,yes (change table in file: ed.8 published 01.11.2025)
 H.13.6.2.docx,13.6.2,הוראה,גביית תשלומי יתר בשכר עובדים,8,2024-09-30,,,https://takam.mof.gov.il/document/H.13.6.2,yes (screenshot)
 H.13.8.4.docx,13.8.4,הוראה,כיסוי ביטוחי לעובדים בתפקיד בעל סיכון מוגבר,1,2021-08-10,,,https://takam.mof.gov.il/document/H.13.8.4,yes (screenshot)
 N.13.4.1.3_licence_fees.docx,13.4.1.3,הודעה,אגרות רישוי לבעלי רכב שירות,20,2026-04-01,,13.4.1,https://takam.mof.gov.il/document/H.13.4.1,yes (screenshot of parent page)
-N.13.5.0_self_driving_B.docx,TODO,הודעה,תוספת נהיגה עצמית ב',,2025-05-15,,13.5.0,https://takam.mof.gov.il/document/H.13.5.0,TODO: edition + notice number
-N.13.0.0_vacation_cap.docx,13.0.0-N-vacation,הודעה,תקרת פדיון ימי חופשה צבורה,,2007-01-30,,13.0.0,https://takam.mof.gov.il/document/H.13.0.0,yes (screenshot of parent page; edition TODO)
+N.13.5.0_self_driving_B.docx,13.5.0-N-selfdrive,הודעה,תוספת נהיגה עצמית ב',9,2025-05-15,,13.5.0,https://takam.mof.gov.il/document/H.13.5.0,UNCONFIRMED: edition 9 and date 2025-05-15 from the last row of the change table inside the file; TODO: notice number (not in the file)
+N.13.0.0_vacation_cap.docx,13.0.0-N-vacation,הודעה,תקרת פדיון ימי חופשה צבורה,,2007-01-30,,13.0.0,https://takam.mof.gov.il/document/H.13.0.0,yes (screenshot of parent page); TODO: edition (the file has no change table)
 C.8-2018_students_csc_circular.txt,csc-8/2018,חוזר נציבות,העסקת סטודנטים בשירות המדינה (חוזר נציבות 8/2018),8/2018,2018-03-29,2024-02-12,13.1.3,https://www.gov.il/BlobFolder/policy/employment_students_csc2018/he/employment_students_csc_paper2018.pdf,ASSUMPTION: valid_to = day before 13.1.3 ed.8 (2024-02-12); verify on gov.il. Source link verified by user.

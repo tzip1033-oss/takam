@@ -27,6 +27,7 @@ CHUNKS = ROOT / "data" / "processed" / "chunks.jsonl"
 EMB_CACHE = ROOT / "data" / "processed" / "embeddings.npy"
 EMB_META = ROOT / "data" / "processed" / "embeddings.json"
 EMB_MODEL = os.getenv("EMBEDDING_MODEL", "intfloat/multilingual-e5-small")
+GLOSSARY = ROOT / "data" / "glossary.csv"
 
 STOP = set(
     "של את על עם מה כמה איך האם לי אני זה אם או גם כל יש מגיע מגיעה מגיעים מגיעות הוא היא "
@@ -56,6 +57,31 @@ def tokenize(text: str, with_variants: bool = True):
     return out
 
 
+def load_glossary():
+    """data/glossary.csv: everyday wording -> official wording used in the instructions.
+    Columns: everyday, official, note. Several rows may share the same `everyday` phrase."""
+    import csv
+    if not GLOSSARY.exists() or os.getenv("USE_GLOSSARY", "1") == "0":
+        return []
+    rows = []
+    with open(GLOSSARY, encoding="utf8", newline="") as f:
+        for r in csv.DictReader(f):
+            key = set(tokenize(r["everyday"], with_variants=False))
+            if key and r["official"].strip():
+                rows.append((key, r["official"].strip()))
+    return rows
+
+
+def expand_query(query: str, glossary) -> str:
+    """Append the official wording for every glossary phrase whose words all appear in the query
+    (a leading ה/ו/ב/ל/מ/כ/ש on a query word is ignored). Queries without glossary words are unchanged."""
+    if not glossary:
+        return query
+    qset = set(tokenize(query, with_variants=True))
+    extra = [off for key, off in glossary if key <= qset and off not in query]
+    return query + " " + " ".join(extra) if extra else query
+
+
 def _parse_date(s):
     try:
         return date.fromisoformat(s) if s else None
@@ -79,6 +105,7 @@ class Retriever:
         self.tok = [tokenize(t) for t in self.texts]
         self.tokset = [set(t) for t in self.tok]
         self.bm25 = BM25Okapi(self.tok)
+        self.glossary = load_glossary()
         self.emb = None
         self.model = None
         if use_embeddings is None:
@@ -93,8 +120,10 @@ class Retriever:
             print("[retrieve] sentence-transformers not installed -> lexical only", file=sys.stderr)
             return
         self.model = SentenceTransformer(EMB_MODEL)
+        import hashlib
+        # the key covers ALL chunk texts: any edit to a document forces a rebuild of the vectors
         key = {"model": EMB_MODEL, "n": len(self.chunks),
-               "ids": [c["chunk_id"] for c in self.chunks][:5]}
+               "sha1": hashlib.sha1("\n".join(self.texts).encode("utf8")).hexdigest()}
         if EMB_CACHE.exists() and EMB_META.exists() and json.load(open(EMB_META)) == key:
             self.emb = np.load(EMB_CACHE)
             return
@@ -106,6 +135,7 @@ class Retriever:
 
     def search(self, query: str, k: int = 5, as_of: date | None = None):
         as_of = as_of or date.today()
+        query = expand_query(query, self.glossary)       # everyday wording -> official wording
         qtok = tokenize(query)
         base = set(tokenize(query, with_variants=False))
         lex = np.array(self.bm25.get_scores(qtok)) if qtok else np.zeros(len(self.chunks))

@@ -32,14 +32,23 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
 # tried in order when the main model is overloaded (503) or rate-limited (429)
 CALL_TIMEOUT_S = float(os.getenv("CALL_TIMEOUT_S", "20"))      # per model call
 TOTAL_BUDGET_S = float(os.getenv("TOTAL_BUDGET_S", "45"))      # per question
-GEMINI_FALLBACKS = [m.strip() for m in os.getenv("GEMINI_FALLBACKS", "gemini-flash-lite-latest,gemini-2.5-flash").split(",") if m.strip()]
+GEMINI_FALLBACKS = [m.strip() for m in os.getenv("GEMINI_FALLBACKS", "gemini-flash-lite-latest,gemini-3.5-flash-lite").split(",") if m.strip()]
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
-# ---- refusal thresholds (PROVISIONAL: tuned on a few questions, see eval/ and README) ----
-# With embeddings: refuse when the best chunk's cosine is below COS_MIN.
-# Lexical only:    refuse when the share of query words found in the best chunk is below COV_MIN.
-COS_MIN = float(os.getenv("COS_MIN", "0.85"))
-COV_MIN = float(os.getenv("COV_MIN", "0.40"))
+# ---- refusal in code: only a safety net for clearly unrelated questions --------------------
+# Measured on eval/questions.csv (44 questions, multilingual-e5-small, with glossary), top-1 chunk:
+#   answerable questions        cos 0.845-0.913, query-word coverage 0.29-1.00
+#   off-topic questions         cos 0.733-0.816, coverage 0.00-0.40
+#   in-domain, not in corpus    cos 0.809-0.860 (they overlap with answerable ones, so for those
+#                               the LLM decides: answerable=false)
+# Rule with embeddings: refuse in code when cos < COS_MIN AND coverage < COV_SEM_MIN.
+# COS_MIN sits between the highest off-topic score (0.816) and the lowest answerable one (0.845).
+# Coverage alone cannot separate the groups (0.40 off-topic vs 0.29 answerable), so without
+# embeddings the rule is weaker: refuse only when almost no query word is found (COV_MIN; catches 3 of the 7 off-topic questions).
+# All thresholds are PROVISIONAL: a 44-question sample, to be re-measured on a larger gold set.
+COS_MIN = float(os.getenv("COS_MIN", "0.83"))
+COV_SEM_MIN = float(os.getenv("COV_SEM_MIN", "0.50"))
+COV_MIN = float(os.getenv("COV_MIN", "0.25"))
 TOP_K = int(os.getenv("TOP_K", "5"))
 
 CONTACT = "takam@mof.gov.il"
@@ -58,6 +67,15 @@ SYSTEM = """אתה עוזר שעונה על שאלות לגבי הוראות ת�
 
 
 # ------------------------------------------------------------------ LLM call (swap here)
+# structured output: the model must return valid JSON (an unescaped quote in a quote/answer used to break parsing)
+REPLY_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "answerable": {"type": "BOOLEAN"}, "answer": {"type": "STRING"}, "source": {"type": "INTEGER"},
+        "quote": {"type": "STRING"}, "external_ref": {"type": "STRING", "nullable": True}},
+    "required": ["answerable", "answer", "source", "quote"],
+}
+
 LAST_MODEL = {"name": None}
 
 
@@ -82,7 +100,7 @@ def call_llm(prompt: str, system: str = SYSTEM) -> str:
                     model=model, contents=prompt,
                     config=types.GenerateContentConfig(
                         system_instruction=system, temperature=0,
-                        response_mime_type="application/json"))
+                        response_mime_type="application/json", response_schema=REPLY_SCHEMA))
                 LAST_MODEL["name"] = model
                 return resp.text
             except Exception as e:           # 503 / 429 / timeout / 404: go on to the next model
@@ -154,23 +172,66 @@ def best_line(question: str, text: str):
 
 
 def _parse_json(raw: str):
-    raw = raw.strip()
+    """Parse the model reply. Models sometimes emit unescaped quotes (תקשי"ר) inside strings,
+    which breaks json.loads; in that case pull the known fields out with regexes."""
+    raw = (raw or "").strip()
     raw = re.sub(r"^```(?:json)?|```$", "", raw, flags=re.M).strip()
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        m = re.search(r"\{.*\}", raw, re.S)
-        return json.loads(m.group(0)) if m else None
+    braces = re.search(r"\{.*\}", raw, re.S)
+    for cand in (raw, braces.group(0) if braces else None):
+        if cand:
+            try:
+                return json.loads(cand)
+            except json.JSONDecodeError:
+                pass
+    if not re.search(r'"answerable"\s*:', raw):
+        return None
+    ans = re.search(r'"answerable"\s*:\s*(true|false)', raw)
+    # a string value runs up to the next known key (or the closing brace)
+    def field(name, nxt):
+        m = re.search(r'"%s"\s*:\s*"(.*?)"\s*,\s*"(?:%s)"\s*:' % (name, "|".join(nxt)), raw, re.S)
+        return m.group(1).replace('\\"', '"') if m else ""
+    src = re.search(r'"source"\s*:\s*"?(\d+)', raw)
+    ext = re.search(r'"external_ref"\s*:\s*(null|"(.*?)"\s*\}?\s*$)', raw, re.S)
+    return {"answerable": bool(ans and ans.group(1) == "true"),
+            "answer": field("answer", ["source", "quote", "external_ref"]),
+            "source": int(src.group(1)) if src else 1,
+            "quote": field("quote", ["external_ref"]),
+            "external_ref": (ext.group(2) if ext and ext.group(2) else None)}
 
 
-def _pointers(hits, limit: int = 3):
-    """External references (Takshir etc.) cited by the two best chunks."""
-    seen, out = set(), []
-    for h in hits[:2]:
-        for r in h["chunk"].get("refs_takshir", []):
-            if r not in seen:
-                seen.add(r)
-                out.append(r)
+def nums(s: str) -> set:
+    return set(re.findall(r"\d+(?:[.,]\d+)*", BIDI.sub("", s or "")))
+
+
+def meta_nums(c) -> set:
+    """Numbers the prompt itself gives the model (edition, valid-from date) and that the system
+    prompt tells it to mention. They are legitimate in an answer even though they are not in the quote."""
+    out = nums(str(c.get("edition") or ""))
+    vf = str(c.get("valid_from") or "")
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", vf):
+        y, m, d = vf.split("-")
+        out |= {y, m, d, str(int(m)), str(int(d)), f"{d}.{m}.{y}", f"{int(d)}.{int(m)}.{y}"}
+    return out
+
+
+# a Takshir reference written with its chapter title:  תקשי"ר, "תוספת מעונות", פרק 25.61
+_TITLED_REF = re.compile(r"""תקשי["״]ר,?\s*["״'’“”]+([^"״'’“”]{2,60}?)["״'’“”]+,?\s*פרק\s*(\d+\.\d+(?:\.\d+)?)""")
+
+
+def _pointers(question: str, hits, limit: int = 3):
+    """Takshir chapters worth pointing to when we refuse. A chunk often cites several chapters
+    (e.g. 24.15, 35.11, 25.61 in different sentences), so a chapter is listed only if the title
+    written next to it shares at least half of its words with the question."""
+    from retrieve import tokenize
+    qset = set(tokenize(question))
+    out = []
+    for h in hits[:3]:
+        text = BIDI.sub("", h["chunk"]["text"])
+        for m in _TITLED_REF.finditer(text):
+            words = tokenize(m.group(1), with_variants=False)
+            covered = [w for w in words if set(tokenize(w)) & qset]
+            if words and len(covered) / len(words) >= 0.5 and m.group(2) not in out:
+                out.append(m.group(2))
     return out[:limit]
 
 
@@ -189,7 +250,9 @@ def answer_question(question: str, as_of: date | None = None, retriever: Retriev
     """Returns a dict:
         refused (bool), reason (str), answer (str), hits (list),
         source (hit dict or None), quote (str), span ((start, end) in source text or None),
-        verified (bool: quote found verbatim), external_ref (str|None), pointers (list)
+        verified (bool: quote found verbatim AND every number of the answer is in the quote or in the
+        edition/date metadata), numbers_in_source (bool: quote verbatim, numbers found elsewhere in the
+        source text only), external_ref (str|None), pointers (list)
     """
     import time
     t0 = time.time()
@@ -198,11 +261,13 @@ def answer_question(question: str, as_of: date | None = None, retriever: Retriev
     hits = r.search(question, k=TOP_K, as_of=as_of)
     t_search = time.time() - t0
     out = dict(refused=True, reason="", answer="", hits=hits, source=None, quote="", span=None,
-               verified=False, external_ref=None, pointers=_pointers(hits), as_of=as_of,
+               verified=False, numbers_in_source=False, external_ref=None, pointers=_pointers(question, hits), as_of=as_of,
                timing={"search_s": round(t_search, 2), "llm_s": 0.0, "model": None}, not_yet_valid=None)
 
     def _weak(h):
-        return (h["cos"] < COS_MIN) if h["cos"] is not None else (h["coverage"] < COV_MIN)
+        if h["cos"] is not None:
+            return h["cos"] < COS_MIN and h["coverage"] < COV_SEM_MIN
+        return h["coverage"] < COV_MIN
 
     def _check_future(out):
         # Past date chosen: does the topic exist in a version that only became valid later?
@@ -245,12 +310,15 @@ def answer_question(question: str, as_of: date | None = None, retriever: Retriev
     answer_text = (data.get("answer") or "").strip()
     span = locate(quote, src["chunk"]["text"])
     # every number in the answer must also appear in the quote, otherwise it is "not verified"
-    nums = lambda s: set(re.findall(r"\d+(?:[.,]\d+)*", BIDI.sub("", s)))
-    verified = span is not None and nums(answer_text) <= nums(quote)
+    ans_nums = nums(answer_text)
+    verified = span is not None and ans_nums <= (nums(quote) | meta_nums(src["chunk"]))
+    # weaker level: the quote is verbatim, and every number of the answer exists somewhere in the same
+    # source text (e.g. the answer lists two table rows but the quote is only one of them)
+    numbers_in_source = span is not None and ans_nums <= (nums(src["chunk"]["text"]) | meta_nums(src["chunk"]))
     if span is None:                                         # show the closest line, flagged
         span = best_line(question, src["chunk"]["text"])
     out.update(refused=False, reason="ok", answer=answer_text,
-               source=src, quote=quote, span=span, verified=verified,
+               source=src, quote=quote, span=span, verified=verified, numbers_in_source=numbers_in_source,
                external_ref=data.get("external_ref"))
 
     # ---- past date + source no longer valid today: point to the current text (code only) ----
