@@ -40,10 +40,12 @@ st.markdown(
       .src {background:#f6f7f9; border:1px solid #dde1e6; border-radius:8px; padding:12px 14px;
             line-height:1.7; direction: rtl; text-align: right; color:#1b1f24;}
       .src mark {background:#ffe58a; padding:1px 2px; border-radius:3px;}
+      .src mark.m2 {background:#b9dcff; padding:1px 2px; border-radius:3px;}
       .meta {color:#5b6470; font-size:0.9rem;}
       @media (prefers-color-scheme: dark) {
         .src {background:#1f242b; border-color:#39414b; color:#e8ecf1;}
         .src mark {background:#7a6200; color:#fff;}
+        .src mark.m2 {background:#14507f; color:#fff;}
         .meta {color:#a9b3bf;}
       }
     </style>
@@ -57,14 +59,19 @@ def load_retriever():
     return Retriever()
 
 
-def render_source(text: str, span):
-    """HTML of the chunk with the supporting span highlighted."""
-    if span:
-        a, b = span
-        body = (html.escape(text[:a]) + "<mark>" + html.escape(text[a:b]) + "</mark>"
-                + html.escape(text[b:]))
-    else:
-        body = html.escape(text)
+def render_source(text: str, span, extra=()):
+    """HTML of the chunk with the supporting span highlighted (yellow), and optionally the
+    lines that hold the remaining numbers of the answer (blue)."""
+    marks = ([(span[0], span[1], "mark")] if span else []) + [(a, b, "m2") for a, b in extra]
+    marks.sort()
+    body, pos = "", 0
+    for a, b, cls in marks:
+        if a < pos:
+            continue
+        tag = "<mark>" if cls == "mark" else '<mark class="m2">'
+        body += html.escape(text[pos:a]) + tag + html.escape(text[a:b]) + "</mark>"
+        pos = b
+    body += html.escape(text[pos:])
     return f'<div class="src">{body.replace(chr(10), "<br>")}</div>'
 
 
@@ -141,12 +148,12 @@ def show_answer(question: str, as_of: date, retriever):
     if not res["verified"]:
         if res.get("numbers_in_source"):
             st.caption("⚠️ אומת חלקית: הציטוט נמצא מילה במילה במקור, ומספרי התשובה מופיעים בקטע, "
-                       "אך לא כולם בציטוט עצמו. יש לבדוק מול המקור המודגש.")
+                       "אך לא כולם בציטוט עצמו. הציטוט מודגש בצהוב, והשורה עם שאר המספרים בכחול.")
         else:
             st.caption("⚠️ לא אומת: הציטוט לא נמצא מילה במילה במקור, או שמספר בתשובה אינו מופיע בקטע. "
                        "יש לבדוק מול המקור המודגש.")
     with st.expander("פתח מקור", expanded=True):
-        st.markdown(render_source(c["text"], res["span"]), unsafe_allow_html=True)
+        st.markdown(render_source(c["text"], res["span"], res.get("extra_spans", ())), unsafe_allow_html=True)
     with st.expander("מקורות נוספים שנבדקו"):
         for h in res["hits"]:
             if h is not res["source"]:

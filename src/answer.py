@@ -218,6 +218,25 @@ def meta_nums(c) -> set:
 _TITLED_REF = re.compile(r"""תקשי["״]ר,?\s*["״'’“”]+([^"״'’“”]{2,60}?)["״'’“”]+,?\s*פרק\s*(\d+\.\d+(?:\.\d+)?)""")
 
 
+def number_spans(missing: set, text: str, main_span):
+    """For every number missing from the quote: (start, end) of the FIRST line of `text` that holds it,
+    so the screen can highlight the second place that supports the answer."""
+    lines, off = [], 0
+    for line in text.split("\n"):
+        lines.append((off, off + len(line), nums(line)))
+        off += len(line) + 1
+    spans = []
+    for n in sorted(missing):
+        for a, b, ln in lines:
+            if main_span and a < main_span[1] and b > main_span[0]:
+                continue
+            if n in ln:
+                if (a, b) not in spans:
+                    spans.append((a, b))
+                break
+    return spans
+
+
 def _pointers(question: str, hits, limit: int = 3):
     """Takshir chapters worth pointing to when we refuse. A chunk often cites several chapters
     (e.g. 24.15, 35.11, 25.61 in different sentences), so a chapter is listed only if the title
@@ -261,7 +280,7 @@ def answer_question(question: str, as_of: date | None = None, retriever: Retriev
     hits = r.search(question, k=TOP_K, as_of=as_of)
     t_search = time.time() - t0
     out = dict(refused=True, reason="", answer="", hits=hits, source=None, quote="", span=None,
-               verified=False, numbers_in_source=False, external_ref=None, pointers=_pointers(question, hits), as_of=as_of,
+               verified=False, numbers_in_source=False, external_ref=None, pointers=_pointers(question, hits), as_of=as_of, extra_spans=[],
                timing={"search_s": round(t_search, 2), "llm_s": 0.0, "model": None}, not_yet_valid=None)
 
     def _weak(h):
@@ -317,6 +336,9 @@ def answer_question(question: str, as_of: date | None = None, retriever: Retriev
     numbers_in_source = span is not None and ans_nums <= (nums(src["chunk"]["text"]) | meta_nums(src["chunk"]))
     if span is None:                                         # show the closest line, flagged
         span = best_line(question, src["chunk"]["text"])
+    missing = ans_nums - nums(quote) - meta_nums(src["chunk"])
+    extra = number_spans(missing, src["chunk"]["text"], span) if (missing and numbers_in_source) else []
+    out["extra_spans"] = extra
     out.update(refused=False, reason="ok", answer=answer_text,
                source=src, quote=quote, span=span, verified=verified, numbers_in_source=numbers_in_source,
                external_ref=data.get("external_ref"))
